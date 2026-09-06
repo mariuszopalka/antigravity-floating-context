@@ -9,34 +9,60 @@ BRAIN_DIR = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-ide", 
 # Standard limit assumption for large models
 LIMIT = 1_000_000 
 
-def get_latest_transcript():
-    pattern = os.path.join(BRAIN_DIR, "*", ".system_generated", "logs", "transcript_full.jsonl")
-    files = glob.glob(pattern)
-    if not files:
+def get_latest_brain_dir():
+    dirs = []
+    for d in glob.glob(os.path.join(BRAIN_DIR, "*")):
+        if os.path.isdir(d) and os.path.exists(os.path.join(d, ".system_generated")):
+            dirs.append(d)
+    if not dirs:
         return None
-    latest_file = max(files, key=os.path.getmtime)
-    return latest_file
+    return max(dirs, key=os.path.getmtime)
 
-def estimate_tokens(filepath):
-    try:
-        total_chars = 0
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                if not line.strip(): continue
-                data = json.loads(line)
-                content = data.get('content', '')
-                if content:
-                    total_chars += len(content)
-        return total_chars // 4
-    except Exception:
-        return 0
+def estimate_tokens():
+    latest_dir = get_latest_brain_dir()
+    if not latest_dir: return 0
+    
+    total_chars = 0
+    # Try reading from transcript files first
+    for pattern in ["transcript_full.jsonl", "transcript.jsonl"]:
+        filepath = os.path.join(latest_dir, ".system_generated", "logs", pattern)
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if not line.strip(): continue
+                        data = json.loads(line)
+                        content = data.get('content', '')
+                        if content:
+                            total_chars += len(content)
+            except Exception:
+                pass
+            if total_chars > 0:
+                return total_chars // 4
+                
+    # Fallback: estimate from the SQLite database files (including WAL) if transcripts are empty
+    conv_dir = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-ide", "conversations")
+    if os.path.exists(conv_dir):
+        convo_id = os.path.basename(latest_dir)
+        try:
+            total_bytes = 0
+            for ext in [".db", ".db-wal", ".db-shm"]:
+                db_path = os.path.join(conv_dir, f"{convo_id}{ext}")
+                if os.path.exists(db_path):
+                    total_bytes += os.path.getsize(db_path)
+            
+            if total_bytes > 0:
+                return total_bytes // 8  # Rough heuristic for SQLite DB overhead to tokens
+        except Exception:
+            pass
+            
+    return 0
 
 def update_label(label, root):
-    latest_file = get_latest_transcript()
-    if not latest_file:
+    tokens = estimate_tokens()
+    if tokens == 0:
         label.config(text="Context: Waiting for data...")
     else:
-        tokens = estimate_tokens(latest_file)
         percentage = (tokens / LIMIT) * 100
         label.config(text=f"Context: {tokens/1000:.1f}k / 1M ({percentage:.1f}%)")
     
