@@ -40,22 +40,25 @@ def estimate_tokens():
             if total_chars > 0:
                 return total_chars // 4
                 
-    # Fallback: estimate from the SQLite database files (including WAL) if transcripts are empty
+    # Fallback: estimate from the SQLite database using actual query
     conv_dir = os.path.join(os.path.expanduser("~"), ".gemini", "antigravity-ide", "conversations")
     if os.path.exists(conv_dir):
         convo_id = os.path.basename(latest_dir)
-        try:
-            total_bytes = 0
-            for ext in [".db", ".db-wal", ".db-shm"]:
-                db_path = os.path.join(conv_dir, f"{convo_id}{ext}")
-                if os.path.exists(db_path):
-                    total_bytes += os.path.getsize(db_path)
-            
-            if total_bytes > 0:
-                return total_bytes // 8  # Rough heuristic for SQLite DB overhead to tokens
-        except Exception:
-            pass
-            
+        db_path = os.path.join(conv_dir, f"{convo_id}.db")
+        if os.path.exists(db_path):
+            try:
+                import sqlite3
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT SUM(LENGTH(step_payload)) FROM steps WHERE step_payload IS NOT NULL")
+                row = cursor.fetchone()
+                if row and row[0]:
+                    total_bytes = row[0]
+                    # Protobuf payload bytes to tokens is roughly 1 token per 4-5 bytes.
+                    return total_bytes // 4
+            except Exception:
+                pass
+                
     return 0
 
 def update_label(label, root):
