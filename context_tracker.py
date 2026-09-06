@@ -64,7 +64,8 @@ def update_label(label, root):
         label.config(text="Context: Waiting for data...")
     else:
         percentage = (tokens / LIMIT) * 100
-        label.config(text=f"Context: {tokens/1000:.1f}k / 1M ({percentage:.1f}%)")
+        limit_m = LIMIT / 1_000_000
+        label.config(text=f"Context: {tokens/1000:.1f}k / {limit_m:g}M ({percentage:.1f}%)")
     
     # Force the window to stay on top, even above the Windows taskbar
     root.lift()
